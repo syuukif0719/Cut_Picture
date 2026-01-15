@@ -1,0 +1,531 @@
+import React, { useState, useRef, useCallback } from 'react';
+
+export default function VideoCutDetector() {
+  const [videoSrc, setVideoSrc] = useState(null);
+  const [videoName, setVideoName] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [frames, setFrames] = useState([]);
+  const [threshold, setThreshold] = useState(30);
+  const [fps, setFps] = useState(5);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const prevFrameRef = useRef(null);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type.startsWith('video/')) {
+      const url = URL.createObjectURL(file);
+      setVideoSrc(url);
+      setVideoName(file.name);
+      setFrames([]);
+      setProgress(0);
+    }
+  };
+
+  const calculateFrameDifference = (imageData1, imageData2) => {
+    if (!imageData1 || !imageData2) return 100;
+    const data1 = imageData1.data;
+    const data2 = imageData2.data;
+    let diff = 0;
+    const step = 16;
+    let count = 0;
+    for (let i = 0; i < data1.length; i += 4 * step) {
+      const r = Math.abs(data1[i] - data2[i]);
+      const g = Math.abs(data1[i + 1] - data2[i + 1]);
+      const b = Math.abs(data1[i + 2] - data2[i + 2]);
+      diff += (r + g + b) / 3;
+      count++;
+    }
+    return diff / count;
+  };
+
+  const captureFrame = (video, canvas, ctx) => {
+    const scale = Math.min(320 / video.videoWidth, 240 / video.videoHeight);
+    const w = video.videoWidth * scale;
+    const h = video.videoHeight * scale;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+    return ctx.getImageData(0, 0, w, h);
+  };
+
+  const captureFullFrame = (video) => {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    return tempCanvas.toDataURL('image/jpeg', 0.9);
+  };
+
+  const processVideo = useCallback(async () => {
+    if (!videoRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    setIsProcessing(true);
+    setFrames([]);
+    setProgress(0);
+    prevFrameRef.current = null;
+    
+    const duration = video.duration;
+    const interval = 1 / fps;
+    const detectedFrames = [];
+    
+    const firstFrame = captureFullFrame(video);
+    detectedFrames.push({ time: 0, image: firstFrame, difference: 100 });
+    prevFrameRef.current = captureFrame(video, canvas, ctx);
+    
+    for (let time = interval; time < duration; time += interval) {
+      await new Promise((resolve) => {
+        video.currentTime = time;
+        video.onseeked = () => {
+          const currentFrame = captureFrame(video, canvas, ctx);
+          const diff = calculateFrameDifference(prevFrameRef.current, currentFrame);
+          
+          if (diff > threshold) {
+            const fullFrame = captureFullFrame(video);
+            detectedFrames.push({ time, image: fullFrame, difference: Math.round(diff) });
+          }
+          
+          prevFrameRef.current = currentFrame;
+          setProgress((time / duration) * 100);
+          resolve();
+        };
+      });
+    }
+    
+    setFrames(detectedFrames);
+    setIsProcessing(false);
+    setProgress(100);
+  }, [threshold, fps]);
+
+  const downloadFrame = (frame, index) => {
+    const link = document.createElement('a');
+    link.href = frame.image;
+    const timeStr = frame.time.toFixed(2).replace('.', '_');
+    link.download = `cut_${String(index + 1).padStart(3, '0')}_${timeStr}s.jpg`;
+    link.click();
+  };
+
+  const downloadAll = () => {
+    frames.forEach((frame, index) => {
+      setTimeout(() => downloadFrame(frame, index), index * 100);
+    });
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 100);
+    return `${mins}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%)',
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      color: '#e8e8e8',
+      padding: '40px 20px'
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&family=Space+Grotesk:wght@400;600;700&display=swap');
+        
+        * { box-sizing: border-box; }
+        
+        .glass-card {
+          background: rgba(255, 255, 255, 0.03);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 16px;
+        }
+        
+        .neon-text {
+          text-shadow: 0 0 10px rgba(0, 255, 200, 0.5), 0 0 40px rgba(0, 255, 200, 0.2);
+        }
+        
+        .upload-zone {
+          border: 2px dashed rgba(0, 255, 200, 0.3);
+          border-radius: 20px;
+          transition: all 0.3s ease;
+          cursor: pointer;
+          position: relative;
+          overflow: hidden;
+        }
+        
+        .upload-zone:hover {
+          border-color: rgba(0, 255, 200, 0.6);
+          background: rgba(0, 255, 200, 0.05);
+        }
+        
+        .upload-zone::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(circle at center, rgba(0, 255, 200, 0.1) 0%, transparent 70%);
+          opacity: 0;
+          transition: opacity 0.3s;
+        }
+        
+        .upload-zone:hover::before { opacity: 1; }
+        
+        .btn-primary {
+          background: linear-gradient(135deg, #00ffc8 0%, #00d4aa 100%);
+          color: #0a0a0f;
+          font-weight: 600;
+          border: none;
+          border-radius: 12px;
+          padding: 14px 28px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          font-family: inherit;
+          font-size: 14px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 30px rgba(0, 255, 200, 0.3);
+        }
+        
+        .btn-primary:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+          background: rgba(255, 255, 255, 0.05);
+          color: #00ffc8;
+          border: 1px solid rgba(0, 255, 200, 0.3);
+          border-radius: 8px;
+          padding: 10px 20px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          font-family: inherit;
+          font-size: 12px;
+        }
+        
+        .btn-secondary:hover {
+          background: rgba(0, 255, 200, 0.1);
+          border-color: rgba(0, 255, 200, 0.5);
+        }
+        
+        .slider-container {
+          position: relative;
+        }
+        
+        .slider {
+          -webkit-appearance: none;
+          width: 100%;
+          height: 6px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 3px;
+          outline: none;
+        }
+        
+        .slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          background: #00ffc8;
+          border-radius: 50%;
+          cursor: pointer;
+          box-shadow: 0 0 10px rgba(0, 255, 200, 0.5);
+        }
+        
+        .progress-bar {
+          height: 4px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 2px;
+          overflow: hidden;
+        }
+        
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #00ffc8, #00d4aa);
+          transition: width 0.1s ease;
+          box-shadow: 0 0 10px rgba(0, 255, 200, 0.5);
+        }
+        
+        .frame-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 20px;
+        }
+        
+        .frame-card {
+          background: rgba(0, 0, 0, 0.4);
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          transition: all 0.3s ease;
+        }
+        
+        .frame-card:hover {
+          transform: translateY(-4px);
+          border-color: rgba(0, 255, 200, 0.3);
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        }
+        
+        .frame-img {
+          width: 100%;
+          aspect-ratio: 16/9;
+          object-fit: cover;
+          display: block;
+        }
+        
+        .frame-info {
+          padding: 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        
+        .tag {
+          background: rgba(0, 255, 200, 0.15);
+          color: #00ffc8;
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+        
+        .scanline {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          pointer-events: none;
+          background: repeating-linear-gradient(
+            0deg,
+            rgba(0, 0, 0, 0) 0px,
+            rgba(0, 0, 0, 0) 2px,
+            rgba(0, 0, 0, 0.03) 2px,
+            rgba(0, 0, 0, 0.03) 4px
+          );
+          z-index: 1000;
+        }
+      `}</style>
+      
+      <div className="scanline" />
+      
+      <div style={{ maxWidth: '1200px', margin: '0 auto', position: 'relative', zIndex: 1 }}>
+        <header style={{ textAlign: 'center', marginBottom: '50px' }}>
+          <h1 style={{
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontSize: 'clamp(28px, 5vw, 48px)',
+            fontWeight: 700,
+            marginBottom: '12px',
+            background: 'linear-gradient(135deg, #fff 0%, #00ffc8 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            letterSpacing: '-1px'
+          }}>
+            CUT DETECTOR
+          </h1>
+          <p style={{
+            color: 'rgba(255, 255, 255, 0.5)',
+            fontSize: '14px',
+            letterSpacing: '2px',
+            textTransform: 'uppercase'
+          }}>
+            動画シーンチェンジ検出 & フレーム抽出
+          </p>
+        </header>
+
+        <div className="glass-card" style={{ padding: '32px', marginBottom: '30px' }}>
+          <label className="upload-zone" style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '50px',
+            textAlign: 'center'
+          }}>
+            <input
+              type="file"
+              accept="video/*"
+              onChange={handleFileUpload}
+              style={{ display: 'none' }}
+            />
+            <div style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '50%',
+              background: 'rgba(0, 255, 200, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '20px'
+            }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#00ffc8" strokeWidth="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17,8 12,3 7,8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </div>
+            <p style={{ fontSize: '16px', marginBottom: '8px', color: '#fff' }}>
+              {videoSrc ? videoName : '動画ファイルをドロップ または クリック'}
+            </p>
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>
+              MP4, MOV, WebM など対応
+            </p>
+          </label>
+        </div>
+
+        {videoSrc && (
+          <div className="glass-card" style={{ padding: '32px', marginBottom: '30px' }}>
+            <video
+              ref={videoRef}
+              src={videoSrc}
+              style={{
+                width: '100%',
+                maxHeight: '400px',
+                borderRadius: '12px',
+                marginBottom: '30px',
+                background: '#000'
+              }}
+              controls
+            />
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '30px' }}>
+              <div>
+                <label style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '12px',
+                  fontSize: '13px',
+                  color: 'rgba(255,255,255,0.7)'
+                }}>
+                  <span>検出感度（しきい値）</span>
+                  <span className="neon-text" style={{ color: '#00ffc8' }}>{threshold}</span>
+                </label>
+                <input
+                  type="range"
+                  className="slider"
+                  min="5"
+                  max="80"
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                />
+                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
+                  低い値 = より多くのカットを検出
+                </p>
+              </div>
+              
+              <div>
+                <label style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '12px',
+                  fontSize: '13px',
+                  color: 'rgba(255,255,255,0.7)'
+                }}>
+                  <span>サンプリングレート</span>
+                  <span className="neon-text" style={{ color: '#00ffc8' }}>{fps} fps</span>
+                </label>
+                <input
+                  type="range"
+                  className="slider"
+                  min="1"
+                  max="15"
+                  value={fps}
+                  onChange={(e) => setFps(Number(e.target.value))}
+                />
+                <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
+                  高い値 = より正確（処理時間増）
+                </p>
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+              <button
+                className="btn-primary"
+                onClick={processVideo}
+                disabled={isProcessing}
+              >
+                {isProcessing ? '処理中...' : 'カット検出開始'}
+              </button>
+              
+              {frames.length > 0 && (
+                <button className="btn-secondary" onClick={downloadAll}>
+                  全{frames.length}枚をダウンロード
+                </button>
+              )}
+            </div>
+            
+            {isProcessing && (
+              <div style={{ marginTop: '24px' }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '8px',
+                  fontSize: '12px'
+                }}>
+                  <span style={{ color: 'rgba(255,255,255,0.5)' }}>解析中...</span>
+                  <span style={{ color: '#00ffc8' }}>{Math.round(progress)}%</span>
+                </div>
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `${progress}%` }} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {frames.length > 0 && (
+          <div className="glass-card" style={{ padding: '32px' }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '24px'
+            }}>
+              <h2 style={{
+                fontFamily: "'Space Grotesk', sans-serif",
+                fontSize: '20px',
+                fontWeight: 600
+              }}>
+                検出されたカット
+              </h2>
+              <span className="tag">{frames.length} CUTS</span>
+            </div>
+            
+            <div className="frame-grid">
+              {frames.map((frame, index) => (
+                <div key={index} className="frame-card">
+                  <img src={frame.image} alt={`Cut ${index + 1}`} className="frame-img" />
+                  <div className="frame-info">
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
+                        Cut #{index + 1}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
+                        {formatTime(frame.time)} / Δ{frame.difference}
+                      </div>
+                    </div>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => downloadFrame(frame, index)}
+                      style={{ padding: '8px 14px' }}
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        <canvas ref={canvasRef} style={{ display: 'none' }} />
+      </div>
+    </div>
+  );
+}
