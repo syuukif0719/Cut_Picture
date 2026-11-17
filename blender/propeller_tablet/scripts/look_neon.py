@@ -66,9 +66,10 @@ def rounded(pts, r):
     out.append(pts[-1])
     return out
 
-H_LET, TRACK, SPACE = 0.13, 0.30, 0.45        # letter height (m), gap between letters / word space (in letter-heights)
+H_LET, TRACK, SPACE = 0.15, 0.30, 0.45        # letter height (m), gap between letters / word space (in letter-heights)
 TUBE_R = 0.0055
-SIGN_Y, SIGN_Z = 0.55, 0.44                   # sign plane: behind the subject, above it
+SUBJ_Z = 0.12                                 # tablet centre at its final (hover) position
+SIGN_Y, SIGN_Z = 0.90, SUBJ_Z - H_LET / 2     # sign centred directly behind the tablet (overlap is intended)
 def build_word(word, mat, x_start):
     x = x_start
     for ch in word:
@@ -107,7 +108,7 @@ def word_light(name, cx, width, col, watts):
     ob.visible_camera = False; ob.visible_glossy = False
     return ob
 wN, wH = word_w("NIGHT"), word_w("HIKE")
-NEON_L = float(os.environ.get("NEON_LIGHT_W", 120))
+NEON_L = float(os.environ.get("NEON_LIGHT_W", 150))
 word_light("Light_Neon_NIGHT", x0 + wN / 2, wN, (1.0, 0.12, 0.45), NEON_L)
 word_light("Light_Neon_HIKE", x0 + total - wH / 2, wH, (0.08, 0.55, 1.0), NEON_L)
 
@@ -136,8 +137,8 @@ except Exception as e:
 # ---- still camera for this look: 47 mm, a bit further back so the sign reads above the tablet
 cd = bpy.data.cameras.new("CAM_Neon"); cam = bpy.data.objects.new("CAM_Neon", cd)
 bpy.data.collections["Cameras"].objects.link(cam)
-cam.location = (0.0, -2.15, 0.22)
-aim = bpy.data.objects.new("Target_Neon", None); aim.location = (0.0, 0.3, 0.30); C.objects.link(aim)
+cam.location = (0.0, -2.15, SUBJ_Z)            # level and centred: tablet and sign share the frame centre
+aim = bpy.data.objects.new("Target_Neon", None); aim.location = (0.0, 0.3, SUBJ_Z); C.objects.link(aim)
 tc = cam.constraints.new('TRACK_TO'); tc.target = aim; tc.track_axis = 'TRACK_NEGATIVE_Z'; tc.up_axis = 'UP_Y'
 cd.dof.use_dof = True; cd.dof.focus_object = bpy.data.objects.get("FLY_Hover")
 s.camera = cam
