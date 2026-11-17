@@ -100,7 +100,7 @@ def micro_surface(m, rough, var=0.04, scale=3500.0, strength=0.12, dist=0.00003)
     return m
 
 M = {}
-M['ivory'] = micro_surface(principled("M_ABS_Ivory", (0.60, 0.52, 0.40), 0.44), 0.44)
+M['ivory'] = micro_surface(principled("M_ABS_Ivory", (0.60, 0.52, 0.40), 0.44), 0.44, var=0.06, strength=0.3, dist=0.00004)
 M['ivory2'] = micro_surface(principled("M_ABS_Ivory_Sleeve", (0.56, 0.51, 0.43), 0.47), 0.47)
 M['blue'] = micro_surface(principled("M_Resin_Blue", (0.012, 0.095, 0.70), 0.36), 0.36, var=0.03)
 M['purple'] = micro_surface(principled("M_Resin_Purple", (0.25, 0.075, 0.62), 0.40), 0.40, var=0.03)
@@ -109,19 +109,19 @@ M['sil_lblue'] = micro_surface(principled("M_Silicone_LightBlue", (0.22, 0.42, 0
 M['sil_blue'] = micro_surface(principled("M_Silicone_Blue", (0.015, 0.12, 0.72), 0.55,
                                          **{"Subsurface Weight": 0.05}), 0.55, var=0.04, strength=0.2)
 M['red'] = micro_surface(principled("M_Silicone_Red", (0.62, 0.04, 0.03), 0.55), 0.55)
-M['screen'] = principled("M_Screen_Glass", (0.004, 0.004, 0.0045), 0.10, **{"IOR": 1.52})
+M['screen'] = principled("M_Screen_Glass", (0.004, 0.004, 0.0045), 0.12, **{"IOR": 1.52, "Coat Weight": 1.0, "Coat Roughness": 0.04, "Coat IOR": 1.5})
 M['screen_bez'] = principled("M_Screen_Border_Black", (0.006, 0.006, 0.007), 0.35)
 M['metal'] = principled("M_Metal_Screw", (0.78, 0.78, 0.80), 0.24, 1.0)
 M['metal_dark'] = principled("M_Metal_Steel", (0.55, 0.56, 0.58), 0.32, 1.0)
 M['glass'] = principled("M_Lamp_Glass", (1.0, 1.0, 1.0), 0.02,
                         **{"Transmission Weight": 1.0, "IOR": 1.5})
 M['filament'] = principled("M_Filament_Emit", (0.9, 0.5, 0.2), 0.4,
-                           **{"Emission Color": (1.0, 0.42, 0.10, 1.0), "Emission Strength": 40.0})
+                           **{"Emission Color": (1.0, 0.42, 0.10, 1.0), "Emission Strength": 110.0})
 M['led'] = principled("M_LED_Pink", (0.9, 0.6, 0.95), 0.3,
-                      **{"Emission Color": (1.0, 0.30, 0.85, 1.0), "Emission Strength": 7.0,
+                      **{"Emission Color": (1.0, 0.30, 0.85, 1.0), "Emission Strength": 16.0,
                          "Subsurface Weight": 0.3})
 M['rubber'] = principled("M_Rubber_Foot", (0.03, 0.03, 0.03), 0.8)
-M['floor'] = micro_surface(principled("M_Floor", (0.035, 0.037, 0.042), 0.62), 0.62, var=0.08,
+M['floor'] = micro_surface(principled("M_Floor", (0.012, 0.013, 0.015), 0.55), 0.62, var=0.08,
                            scale=900.0, strength=0.25, dist=0.0002)
 
 def blade_material():
@@ -142,7 +142,7 @@ def blade_material():
         L.new(add.outputs[0], g.inputs[0]); L.new(add.outputs[0], l.inputs[0])
         L.new(g.outputs[0], mm.inputs[0]); L.new(l.outputs[0], mm.inputs[1])
         return mm
-    b1 = band(0.142, 0.151, 0); b2 = band(0.160, 0.169, 1)
+    b1 = band(0.136, 0.149, 0); b2 = band(0.158, 0.171, 1)
     mx = N.new("ShaderNodeMath"); mx.operation = 'MAXIMUM'
     L.new(b1.outputs[0], mx.inputs[0]); L.new(b2.outputs[0], mx.inputs[1])
     mix = N.new("ShaderNodeMix"); mix.data_type = 'RGBA'; mix.location = (-300, 300)
@@ -410,7 +410,7 @@ glass = slab_xz("Screen_Glass", rect_poly(P['scr_cx'], 0, P['scr_w'] - 0.6, P['s
 # ================================================================ 3. PROPELLER
 mount = lathe_obj("Propeller_Mount", [(0, -EMB), (13.0, -EMB)] + arc_pts(11.0, 6.0, 2.0, 0, 90, 5) + [(0, 8.0)],
                   C_PROP, M['purple'], (0, 0, Z1))
-collar = lathe_obj("Propeller_Collar", rounded_cyl_profile(8.5, 19.0, 0, 1.5, z0=7.5), C_PROP, M['ivory'], (0, 0, Z1))
+collar = lathe_obj("Propeller_Collar", rounded_cyl_profile(9.0, 26.5, 0, 1.5, z0=7.5), C_PROP, M['ivory'], (0, 0, Z1))
 shaft = lathe_obj("Propeller_Shaft", rounded_cyl_profile(3.6, 26.0, 0, 0.6, z0=25.0), C_PROP, M['metal_dark'], (0, 0, Z1))
 
 rotor = bpy.data.objects.new("Propeller_Rotor", None)
@@ -423,11 +423,11 @@ def child(ob, parent):
     return ob
 
 hub = child(lathe_obj("Propeller_Hub", rounded_cyl_profile(11.0, 15.0, 1.2, 1.2, z0=-7.5), C_PROP, M['purple'], (0, 0, 0)), rotor)
-cap = child(lathe_obj("Propeller_Cap", rounded_cyl_profile(8.8, 6.0, 0, 1.0, z0=7.0), C_PROP, M['ivory'], (0, 0, 0)), rotor)
-dome_prof = [(0, 12.5), (7.2, 12.5)] + arc_pts(0, 12.5, 7.2, 0, 90, 10)[1:]
+cap = child(lathe_obj("Propeller_Cap", rounded_cyl_profile(10.0, 5.5, 0, 1.0, z0=7.0), C_PROP, M['ivory'], (0, 0, 0)), rotor)
+dome_prof = [(0, 12.0), (9.2, 12.0)] + arc_pts(0, 12.0, 9.2, 0, 90, 14)[1:]
 dome = child(lathe_obj("Propeller_Dome_Glass", dome_prof, C_PROP, M['glass'], (0, 0, 0)), rotor)
-bead_prof = [(0, 12.4)] + arc_pts(0, 15.0, 3.0, -60, 90, 8)
-bead = child(lathe_obj("Propeller_Dome_Bead", bead_prof, C_PROP, M['metal'], (0, 0, 0)), rotor)
+bead_prof = [(0, 11.9)] + arc_pts(0, 15.5, 4.2, -60, 90, 10)
+bead = child(lathe_obj("Propeller_Dome_Bead", bead_prof, C_PROP, M['purple'], (0, 0, 0)), rotor)
 
 def blade_mesh():
     R0, R1 = 8.0, P['prop_span'] / 2
@@ -439,12 +439,12 @@ def blade_mesh():
         t = min(t, 0.996)
         x = R0 + (R1 - R0) * t
         ss = min(t / 0.55, 1.0); ss = ss * ss * (3 - 2 * ss)
-        chord = 11.0 + 31.0 * ss
+        chord = 12.0 + 42.0 * ss
         if t > 0.78:
             q = (t - 0.78) / 0.22
             chord *= math.sqrt(max(1 - q * q, 0.0)) * 0.97 + 0.03
         th = min(6.0 + (2.4 - 6.0) * t, 0.22 * chord + 0.4)
-        tw = radians(15.0 + (5.0 - 15.0) * t)
+        tw = radians(18.0 + (6.0 - 18.0) * t)
         lp = []
         for i in range(NA):
             a = 2 * pi * i / NA
@@ -559,7 +559,7 @@ xs = (-3.0, -1.0, 1.0, 3.0)
 for i, x in enumerate(xs):
     zs = (24.0, 46.0) if i % 2 == 0 else (46.0, 24.0)
     fil += [(lx + x, 0, lz + zs[0]), (lx + x, 0, lz + zs[1])]
-poly_curve("Lamp_Filament", fil, C_LAMP, M['filament'], 0.33)
+poly_curve("Lamp_Filament", fil, C_LAMP, M['filament'], 0.42)
 poly_curve("Lamp_Support_L", [(lx - 3, 0, lz + 15.5), (lx - 3, 0, lz + 24.2)], C_LAMP, M['metal_dark'], 0.25)
 poly_curve("Lamp_Support_R", [(lx + 3, 0, lz + 15.5), (lx + 3, 0, lz + 24.2)], C_LAMP, M['metal_dark'], 0.25)
 poly_curve("Lamp_Support_Top", [(lx, 0, lz + 21.0), (lx, 0, lz + 47.5), (lx - 3, 0, lz + 46.6), (lx + 3, 0, lz + 46.6)], C_LAMP, M['metal_dark'], 0.18)
@@ -619,11 +619,14 @@ C_CUT.hide_render = True
 
 # ================================================================ 8. STUDIO
 floor_z = Z0 - 2.0 + EMB
-bpy.ops.mesh.primitive_plane_add(size=60.0, location=(0, 0, floor_z * MM))
-floor = bpy.context.active_object; floor.name = "Studio_Floor"
-for c_ in floor.users_collection: c_.objects.unlink(floor)
-C_STUDIO.objects.link(floor); floor.data.materials.append(M['floor'])
-
+cyc = [(0, 0.0), (1600.0, 0.0)] + arc_pts(1600.0, 900.0, 900.0, -90, 0, 16)[1:] + [(2500.0, 3500.0)]
+v, f = lathe(cyc, 96)
+floor = finish_mesh("Studio_Cyclorama", v, f, C_STUDIO, M['floor'], sharp_deg=80, wnormal=False)
+floor.location = (0, 0, floor_z * MM)
+bulb = bpy.data.lights.new("Light_LampBulb", 'POINT'); bulb.energy = 0.35; bulb.shadow_soft_size = 0.003
+bulb.color = (1.0, 0.55, 0.22)
+bo_ = bpy.data.objects.new("Light_LampBulb", bulb); bo_.location = Vector((lx, 0, lz + 35.0)) * MM
+C_LAMP.objects.link(bo_)
 target = bpy.data.objects.new("Target_Center", None); target.location = (0, 0, 0.025)
 C_STUDIO.objects.link(target)
 
@@ -636,13 +639,14 @@ def area(name, loc, size, power, shape='SQUARE', size_y=None, color=(1, 1, 1)):
     return ob
 area("Light_Key", (-0.85, -1.05, 0.95), 0.55, 75.0, color=(1.0, 0.97, 0.93))
 area("Light_Rim", (1.05, 0.75, 0.35), 0.12, 70.0, shape='RECTANGLE', size_y=0.9, color=(0.92, 0.96, 1.0))
-area("Light_Fill", (1.3, -1.0, 0.15), 1.4, 5.0, color=(0.95, 0.97, 1.0))
+area("Light_Fill", (1.3, -1.0, 0.15), 1.4, 6.0, color=(0.95, 0.97, 1.0))
+area("Light_Softbox_Reflect", (-0.35, -2.3, 0.75), 1.2, 25.0, shape='RECTANGLE', size_y=0.5)
 
 world = bpy.data.worlds.new("World_Studio"); scene.world = world
 try: world.use_nodes = True
 except Exception: pass
 bg = world.node_tree.nodes.get("Background")
-bg.inputs["Color"].default_value = (0.012, 0.013, 0.016, 1); bg.inputs["Strength"].default_value = 1.0
+bg.inputs["Color"].default_value = (0.008, 0.0085, 0.01, 1); bg.inputs["Strength"].default_value = 1.0
 
 # ================================================================ 9. CAMERAS (ARRI ALEXA 35 + Signature Prime 75mm, T5.6)
 scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
