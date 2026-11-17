@@ -156,6 +156,20 @@ def blade_material():
     return m
 M['blade'] = blade_material()
 
+# ---- color scheme: "white" unifies every plastic / resin / silicone part to the same white
+COLOR_SCHEME = os.environ.get("TAB_COLORS", "white")
+WHITE = (0.80, 0.80, 0.78)
+if COLOR_SCHEME == "white":
+    for k in ('ivory', 'ivory2', 'blue', 'purple', 'sil_lblue', 'sil_blue', 'red'):
+        b_ = M[k].node_tree.nodes["Principled BSDF"]
+        b_.inputs["Base Color"].default_value = (*WHITE, 1)
+        M[k].diffuse_color = (*WHITE, 1)
+    for n_ in M['blade'].node_tree.nodes:
+        if n_.bl_idname == "ShaderNodeMix":
+            for s_ in n_.inputs:
+                if s_.identifier in ("A_Color", "B_Color"):
+                    s_.default_value = (*WHITE, 1)
+
 # ---------------------------------------------------------------- geometry helpers
 def finish_mesh(name, verts_mm, faces, collection, mat=None, sharp_deg=38.0, wnormal=True, uv_fn=None):
     me = bpy.data.meshes.new(name)
