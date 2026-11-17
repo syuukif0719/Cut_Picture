@@ -2,8 +2,7 @@
 # Usage: python anim_flyin.py <in.blend> <out.blend>
 # Rig: FLY_Root (flight path, baked every 2 frames from the curves below) -> FLY_Hover (bob / wobble)
 #      -> every top-level tablet object (and boolean cutters).
-# Beats @24fps:  1-18 hover far away | 18-30 wind-up (pull back, lean back, prop spins up)
-#                30-~70 dash, weaving left/right with banking | 70-144 brake (flare) and drift in slowly, settle.
+# Beats @24fps (4 s): 1-73 smooth ease-in/ease-out flight from 9 m away with a gentle S-weave | 73-96 hover.
 import bpy, sys, os, math
 from math import radians, degrees, sin, cos, pi, exp, atan2
 
@@ -11,7 +10,7 @@ src, dst = sys.argv[-2], sys.argv[-1]
 SKILL_SCRIPTS = os.environ.get("BPL_SCRIPTS", "")
 bpy.ops.wm.open_mainfile(filepath=src)
 scene = bpy.context.scene
-FPS, F0, F1 = 24, 1, 144
+FPS, F0, F1 = 24, 1, 96
 scene.render.fps = FPS
 scene.frame_start, scene.frame_end = F0, F1
 
@@ -38,35 +37,30 @@ def smooth(a, b, x):
     return t * t * (3 - 2 * t)
 
 # ---------------------------------------------------------------- flight curves (per frame)
-Y_FAR, Z_FAR, Z_END, BACK = 9.0, 0.75, 0.12, 0.28
+# v3: 4 s total. Moves for 3 s (frames 1-73) with a smooth ease-in/ease-out (smootherstep: speed and
+#     acceleration are 0 at both ends), a gentle single S-weave, tiny settle, then hovers for the last second.
+Y_FAR, Z_FAR, Z_END = 9.0, 0.75, 0.12
+MOVE0, MOVE1 = 1, 73
 FR = list(range(F0 - 12, F1 + 13))
-def vel(f):              # forward speed profile (normalized): burst, cruise, long exponential brake
-    if f < 30: return 0.0
-    if f < 38: return smooth(30, 38, f)
-    if f < 60: return 1.0
-    return exp(-(f - 60) / 10.0)
-dist = {}; acc = 0.0
-for f in FR:
-    acc += vel(f); dist[f] = acc
-total = dist[F1]
+def ease(u):
+    u = min(max(u, 0.0), 1.0)
+    return u * u * u * (u * (6 * u - 15) + 10)
+dist = {f: ease((f - MOVE0) / (MOVE1 - MOVE0)) for f in FR}
+total = 1.0
 def y_of(f):
-    back = BACK * smooth(18, 30, f)                  # wind-up: drifts back a little
-    d = min(dist.get(f, total) / total, 1.0)
     ovs = 0.0
-    if f > 92:                                        # gentle overshoot toward camera, then back
-        ovs = -0.05 * exp(-(f - 92) / 14.0) * sin(2 * pi * (f - 92) / 38.0)
-    return Y_FAR + back - (Y_FAR + BACK) * d + ovs
+    if f > MOVE1 - 4:                                  # small, soft settle after stopping
+        t = f - (MOVE1 - 4)
+        ovs = -0.03 * exp(-t / 9.0) * sin(2 * pi * t / 28.0)
+    return Y_FAR * (1 - dist[f]) + ovs
 def x_of(f):
     y = y_of(f)
-    trav = (Y_FAR + BACK) * min(dist.get(f, total) / total, 1.0)   # distance actually travelled in the dash
-    amp = 0.5 * smooth(0.8, 5.0, y) * smooth(0.0, 1.0, trav)       # weave fades out near the camera
-    return amp * sin(2 * pi * trav / 7.0)
+    trav = Y_FAR * dist[f]
+    amp = 0.3 * smooth(0.8, 5.0, y) * smooth(0.0, 1.5, trav)
+    return amp * sin(2 * pi * trav / 9.0)
 def z_of(f):
-    y = y_of(f)
-    k = max(min(y / Y_FAR, 1.0), 0.0) ** 1.25
-    z = Z_END + (Z_FAR - Z_END) * k
-    z += 0.05 * smooth(18, 28, f) * (1 - smooth(30, 40, f))   # small rise during the wind-up
-    return z
+    k = max(min(y_of(f) / Y_FAR, 1.0), 0.0) ** 1.25
+    return Z_END + (Z_FAR - Z_END) * k
 
 P = {f: (x_of(f), y_of(f), z_of(f)) for f in FR}
 def d1(f, i): return (P[min(f + 1, FR[-1])][i] - P[max(f - 1, FR[0])][i]) / 2.0
@@ -77,7 +71,6 @@ pref_interp('BEZIER')
 for f in range(F0 - 12, F1 + 13, 2):
     vy, ay = -d1(f, 1) / vmax, -d2(f, 1) / vmax        # forward (toward camera) speed / accel, normalized
     pitch = 13 * vy + 300 * ay                          # lean into acceleration, flare when braking
-    pitch -= 9 * smooth(18, 26, f) * (1 - smooth(29, 33, f))   # wind-up lean back
     pitch = max(-16.0, min(24.0, pitch))
     roll = max(-24.0, min(24.0, 520.0 * d2(f, 0)))     # bank into the weave
     yaw = 0.45 * degrees(atan2(d1(f, 0), max(-d1(f, 1), 1e-4))) if -d1(f, 1) > 0.002 else 0.0
@@ -87,7 +80,7 @@ for f in range(F0 - 12, F1 + 13, 2):
     root.keyframe_insert("rotation_euler", frame=f)
 
 # hover bob + wobble on FLY_Hover: livelier during the dash, calm while hovering
-def env(f): return 0.3 + 0.7 * smooth(28, 36, f) * (1 - smooth(66, 96, f))
+def env(f): return 0.3 + 0.7 * smooth(5, 20, f) * (1 - smooth(50, 80, f))
 for f in range(F0 - 12, F1 + 13, 4):
     a = env(f)
     hover.location = (0.004 * a * sin(f * 0.21 + 1.0), 0.0, 0.007 * a * sin(f * 0.26) + 0.002 * sin(f * 0.61))
@@ -103,7 +96,7 @@ rotor.animation_data_clear()
 pref_interp('LINEAR')
 ang = 0.0
 for f in range(F0 - 12, F1 + 13):
-    spd = 55.0 + (190.0 - 55.0) * smooth(16, 30, f)
+    spd = 190.0
     ang += spd
     if (f - F0) % 2 == 0 or f == F1 + 12:
         rotor.rotation_euler = (0, 0, radians(ang))
