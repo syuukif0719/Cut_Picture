@@ -36,52 +36,47 @@ def smooth(a, b, x):
     t = min(max((x - a) / (b - a), 0.0), 1.0)
     return t * t * (3 - 2 * t)
 
-# ---------------------------------------------------------------- flight curves (per frame)
-# v3: 4 s total. Moves for 3 s (frames 1-73) with a smooth ease-in/ease-out (smootherstep: speed and
-#     acceleration are 0 at both ends), a gentle single S-weave, tiny settle, then hovers for the last second.
+# ---------------------------------------------------------------- flight curves (continuous, C2-smooth)
+# v4: 4 s total. Moves for 3 s (frames 1-73) on a smootherstep ease (speed and acceleration are 0 at both ends),
+#     a gentle single S-weave, then hovers for the last second.
+# Every term is a smooth function of continuous time (no clamps, no if-switches, no numeric noise),
+# so the curves stay smooth; keys are baked on every frame (and motion blur samples between them).
 Y_FAR, Z_FAR, Z_END = 9.0, 0.75, 0.12
-MOVE0, MOVE1 = 1, 73
-FR = list(range(F0 - 12, F1 + 13))
-def ease(u):
-    u = min(max(u, 0.0), 1.0)
-    return u * u * u * (u * (6 * u - 15) + 10)
-dist = {f: ease((f - MOVE0) / (MOVE1 - MOVE0)) for f in FR}
-total = 1.0
-def y_of(f):
-    ovs = 0.0
-    if f > MOVE1 - 4:                                  # small, soft settle after stopping
-        t = f - (MOVE1 - 4)
-        ovs = -0.03 * exp(-t / 9.0) * sin(2 * pi * t / 28.0)
-    return Y_FAR * (1 - dist[f]) + ovs
+MOVE0, MOVE1 = 1.0, 73.0
+def sstep(a, b, x):                       # smootherstep: C2 continuous
+    t = min(max((x - a) / (b - a), 0.0), 1.0)
+    return t * t * t * (t * (6 * t - 15) + 10)
+def prog(f):                              # 7th-order smoothstep: speed, accel AND jerk are 0 at start/stop,
+    t = min(max((f - MOVE0) / (MOVE1 - MOVE0), 0.0), 1.0)   # so the pitch (driven by accel) also eases in/out
+    return t ** 4 * (35 + t * (-84 + t * (70 - 20 * t)))
+def y_of(f): return Y_FAR * (1.0 - prog(f))
 def x_of(f):
-    y = y_of(f)
-    trav = Y_FAR * dist[f]
-    amp = 0.3 * smooth(0.8, 5.0, y) * smooth(0.0, 1.5, trav)
-    return amp * sin(2 * pi * trav / 9.0)
+    p = prog(f)                                   # 0..1 along the trip
+    return 0.32 * sin(2 * pi * p) * sin(pi * p)   # one smooth S, zero at both ends (analytic, no ramps)
 def z_of(f):
-    k = max(min(y_of(f) / Y_FAR, 1.0), 0.0) ** 1.25
-    return Z_END + (Z_FAR - Z_END) * k
-
-P = {f: (x_of(f), y_of(f), z_of(f)) for f in FR}
-def d1(f, i): return (P[min(f + 1, FR[-1])][i] - P[max(f - 1, FR[0])][i]) / 2.0
-def d2(f, i): return P[min(f + 1, FR[-1])][i] - 2 * P[f][i] + P[max(f - 1, FR[0])][i]
-vmax = max(abs(d1(f, 1)) for f in FR[1:-1])
+    k = (1.0 - prog(f))
+    return Z_END + (Z_FAR - Z_END) * k * k * (1.6 - 0.6 * k)   # smooth descent, no fractional powers
+def pos(f): return (x_of(f), y_of(f), z_of(f))
+H = 0.25                                  # sub-frame step for analytic-ish derivatives
+def d1(f, i): return (pos(f + H)[i] - pos(f - H)[i]) / (2 * H)
+def d2(f, i): return (pos(f + H)[i] - 2 * pos(f)[i] + pos(f - H)[i]) / (H * H)
+vmax = Y_FAR * 2.1875 / (MOVE1 - MOVE0)    # peak speed of the 7th-order smoothstep (m/frame)
+def soft(x, lim): return lim * math.tanh(x / lim)   # soft limit instead of a hard clamp
 
 pref_interp('BEZIER')
-for f in range(F0 - 12, F1 + 13, 2):
-    vy, ay = -d1(f, 1) / vmax, -d2(f, 1) / vmax        # forward (toward camera) speed / accel, normalized
-    pitch = 13 * vy + 300 * ay                          # lean into acceleration, flare when braking
-    pitch = max(-16.0, min(24.0, pitch))
-    roll = max(-24.0, min(24.0, 520.0 * d2(f, 0)))     # bank into the weave
-    yaw = 0.45 * degrees(atan2(d1(f, 0), max(-d1(f, 1), 1e-4))) if -d1(f, 1) > 0.002 else 0.0
-    root.location = P[f]
+for f in range(int(F0) - 12, int(F1) + 13):
+    vy, ay = -d1(f, 1) / vmax, -d2(f, 1) / vmax
+    pitch = soft(13 * vy + 260 * ay, 22.0)                 # lean into acceleration, rise when braking
+    roll = soft(520.0 * d2(f, 0), 20.0)                    # bank into the weave
+    yaw = 0.45 * degrees(math.atan(d1(f, 0) / (abs(d1(f, 1)) + 0.02)))   # head into the curve, smooth at rest
+    root.location = pos(f)
     root.rotation_euler = (radians(pitch), radians(roll), radians(yaw))
     root.keyframe_insert("location", frame=f)
     root.keyframe_insert("rotation_euler", frame=f)
 
 # hover bob + wobble on FLY_Hover: livelier during the dash, calm while hovering
-def env(f): return 0.3 + 0.7 * smooth(5, 20, f) * (1 - smooth(50, 80, f))
-for f in range(F0 - 12, F1 + 13, 4):
+def env(f): return 0.3 + 0.7 * sstep(5, 20, f) * (1 - sstep(50, 80, f))
+for f in range(F0 - 12, F1 + 13, 2):
     a = env(f)
     hover.location = (0.004 * a * sin(f * 0.21 + 1.0), 0.0, 0.007 * a * sin(f * 0.26) + 0.002 * sin(f * 0.61))
     hover.rotation_euler = (radians(1.8 * a * sin(f * 0.23 + 0.5)), radians(2.4 * a * sin(f * 0.17 + 2.0)),
@@ -115,6 +110,10 @@ for fc in all_fcurves(rotor):
     for kp in fc.keyframe_points: kp.interpolation = 'LINEAR'
 for fc in all_fcurves(root):
     for kp in fc.keyframe_points: kp.handle_left_type = kp.handle_right_type = 'AUTO'
+for ob_ in [hover]:
+    for fc in all_fcurves(ob_):
+        for kp in fc.keyframe_points: kp.handle_left_type = kp.handle_right_type = 'AUTO'
+        fc.update()
     fc.update()
 
 # ---------------------------------------------------------------- studio
@@ -146,6 +145,9 @@ if SKILL_SCRIPTS:
     exec(open(os.path.join(SKILL_SCRIPTS, "camera_preset.py")).read(), g)
     print(g.get("result", {}).get("warnings"))
 scene.render.use_motion_blur = True
+for nm in ('Propeller_Rotor', 'Propeller_Blade_L', 'Propeller_Blade_R', 'Propeller_Hub'):
+    try: bpy.data.objects[nm].cycles.motion_steps = 4
+    except Exception as e: print('motion_steps', nm, e)
 scene.render.motion_blur_shutter = 0.5
 scene.frame_set(F0)
 bpy.ops.wm.save_as_mainfile(filepath=dst)
